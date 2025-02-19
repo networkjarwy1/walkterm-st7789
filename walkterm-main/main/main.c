@@ -21,6 +21,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "driver/i2c.h"
 
 #include "st7789.h"
 #include "fontx.h"
@@ -28,6 +29,9 @@
 #include "cardkb.h"
 
 TFT_t dev;
+
+#define ESP32C6_ADDR 0x08
+#define ESP32S3_ADDR 0x09
 
 #define INTERVAL 0x3E8
 #define WAIT vTaskDelay(pdMS_TO_TICKS(INTERVAL))
@@ -37,6 +41,21 @@ TFT_t dev;
 #define TEXT_COLOR GREEN
 
 static const char *TAG = "ST7789";
+
+uint8_t buffer[40] = {0x20};
+
+char i2c_data[0x80];
+
+void i2c_send_data(uint8_t addr, char *data) {
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write(cmd, (uint8_t *)data, strlen(data), true);
+    i2c_master_read_byte(cmd, (uint8_t *)data, I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+}
 
 void traceHeap() {
 	static uint32_t _free_heap_size = 0x0;
@@ -84,16 +103,15 @@ void ST7789(void *pvParameters){
 		lcdFillScreen(&dev, BLACK);
 		uint16_t xpos = (CONFIG_WIDTH-1)-16;
 		uint16_t ypos = 0;
-		lcdSetFontDirection(&dev, 1);
+		/*lcdSetFontDirection(&dev, 1);
 
 		strcpy((char *)ascii, TERMINAL_PROMPT);
 		lcdDrawString(&dev, DEFAULT_FONT, xpos, ypos, ascii, TEXT_COLOR);
 
 
-		lcdDrawFinish(&dev);
+		lcdDrawFinish(&dev);*/
 		lcdSetFontDirection(&dev, 1);
 
-		uint8_t buffer[64] = {0x20};
 		int i = 0;
 		while (1) {
             uint8_t key = cardKB_read_key();
@@ -106,7 +124,6 @@ void ST7789(void *pvParameters){
             }
             if (key && key != 0x08) {
                 buffer[i++] = key;
-                lcdFillScreen(&dev, BLACK);
                 lcdDrawString(&dev, DEFAULT_FONT, xpos, ypos, buffer, TEXT_COLOR);
             }
             vTaskDelay(pdMS_TO_TICKS(2));
@@ -171,6 +188,11 @@ esp_err_t mountSPIFFS(char * path, char * label, int max_files) {
 	return ret;
 }
 
+void handle_OTG_module(){
+    i2c_send_data(ESP32S3_ADDR, "OTG");
+
+}
+
 void app_main(void){
     spi_master_init(&dev, CONFIG_MOSI_GPIO, CONFIG_SCLK_GPIO, CONFIG_CS_GPIO, CONFIG_DC_GPIO, CONFIG_RESET_GPIO, CONFIG_BL_GPIO);
 	lcdInit(&dev, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
@@ -183,6 +205,12 @@ void app_main(void){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     cardKB_init();
+    while(0x1){
+        xTaskCreate(ST7789, "ST7789", 1024*6, NULL, 2, NULL);
+        if (strcmp((char *)buffer, "reset") == 0) {
+            break;
+        }else if(strcmp((char *)buffer, "OTG") == 0){
 
-	xTaskCreate(ST7789, "ST7789", 1024*6, NULL, 2, NULL);
+        }
+    }
 }
